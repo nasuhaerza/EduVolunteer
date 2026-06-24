@@ -1,12 +1,12 @@
 import { MATCH_THRESHOLDS } from '../constants';
 import type {
-    AdminStats,
-    Match,
-    MatchScore,
-    School,
-    User,
-    VolunteerProfile,
-    VolunteerRequest,
+  AdminStats,
+  Match,
+  MatchScore,
+  School,
+  User,
+  VolunteerProfile,
+  VolunteerRequest,
 } from '../types';
 import { supabase } from './supabase';
 
@@ -106,7 +106,10 @@ export const matchingService = {
       .select('*, school:schools(*)')
       .eq('school_id', schoolId)
       .order('created_at', { ascending: false });
-    if (error) throw error;
+    if (error) {
+      console.error('[matchingService] getRequestsBySchool error:', error.message, error.code);
+      throw error;
+    }
     return (data ?? []) as VolunteerRequest[];
   },
 
@@ -236,34 +239,74 @@ export const matchingService = {
     userId: string,
     payload: Partial<Omit<VolunteerProfile, 'id' | 'user_id' | 'user'>>
   ) {
-    // Try update first
-    const { error: updateError, count } = await supabase
+    // Check if row exists first
+    const { data: existing } = await supabase
       .from('volunteer_profiles')
-      .update(payload)
+      .select('id')
       .eq('user_id', userId)
-      .select('id', { count: 'exact', head: true });
+      .maybeSingle();
 
-    // If no row existed, insert instead
-    if (!updateError && count === 0) {
-      const { error: insertError } = await supabase
+    if (existing) {
+      // Update existing row
+      const { error } = await supabase
+        .from('volunteer_profiles')
+        .update(payload)
+        .eq('user_id', userId);
+      if (error) throw error;
+    } else {
+      // Insert new row
+      const { error } = await supabase
         .from('volunteer_profiles')
         .insert({ user_id: userId, ...payload });
-      if (insertError) throw insertError;
-    } else if (updateError) {
-      throw updateError;
+      if (error) throw error;
     }
   },
 
   // ── Schools ───────────────────────────────────────────────────────────────
 
   async getSchoolByUserId(userId: string): Promise<School | null> {
+    // Use .limit(1) to avoid "multiple rows" error if duplicates exist
     const { data, error } = await supabase
       .from('schools')
       .select('*')
       .eq('user_id', userId)
-      .single();
-    if (error) return null;
-    return data as School;
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.warn('[matchingService] getSchoolByUserId error:', error.message);
+      return null;
+    }
+
+    if (data && data.length > 0) return data[0] as School;
+
+    // Fallback: find by user name matching school_name
+    const { data: userRow } = await supabase
+      .from('users')
+      .select('name')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (userRow?.name) {
+      const { data: byName } = await supabase
+        .from('schools')
+        .select('*')
+        .ilike('school_name', userRow.name)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (byName && byName.length > 0) {
+        const school = byName[0] as School;
+        // Fix user_id so future queries work
+        await supabase
+          .from('schools')
+          .update({ user_id: userId })
+          .eq('id', school.id);
+        return school;
+      }
+    }
+
+    return null;
   },
 
   async getAllSchools(): Promise<School[]> {
@@ -273,11 +316,19 @@ export const matchingService = {
   },
 
   async updateSchool(id: string, payload: Partial<School>) {
+    // Also ensure user_id is set (may be null for schools created before this fix)
+    const updatePayload = { ...payload };
+    // Remove joined fields that aren't DB columns
+    delete (updatePayload as any).user;
+
     const { error } = await supabase
       .from('schools')
-      .update(payload)
+      .update(updatePayload)
       .eq('id', id);
-    if (error) throw error;
+    if (error) {
+      console.error('[matchingService] updateSchool error:', error.message);
+      throw error;
+    }
   },
 
   // ── Agent Matching ────────────────────────────────────────────────────────

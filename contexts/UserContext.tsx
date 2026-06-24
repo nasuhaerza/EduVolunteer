@@ -22,7 +22,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const { appUser } = useAuth();
   const [volunteerProfile, setVolunteerProfile] = useState<VolunteerProfile | null>(null);
   const [schoolProfile, setSchoolProfile] = useState<School | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true); // start true until first load
 
   const refreshProfile = useCallback(async () => {
     if (!appUser) return;
