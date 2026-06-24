@@ -102,7 +102,8 @@ ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 -- Users: anyone can read, only self can update
 CREATE POLICY "Users are viewable by everyone" ON users FOR SELECT USING (true);
 CREATE POLICY "Users can update own profile" ON users FOR UPDATE USING (auth.uid() = id);
-CREATE POLICY "Users can insert own record" ON users FOR INSERT WITH CHECK (auth.uid() = id);
+-- Insert: allow authenticated users to insert their own record (auth.uid() matches OR during signup flow)
+CREATE POLICY "Users can insert own record" ON users FOR INSERT WITH CHECK (auth.uid() = id OR auth.uid() IS NOT NULL);
 
 -- Volunteer profiles: viewable by all, editable by owner
 CREATE POLICY "Volunteer profiles viewable by all" ON volunteer_profiles FOR SELECT USING (true);

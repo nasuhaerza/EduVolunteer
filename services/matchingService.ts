@@ -236,11 +236,22 @@ export const matchingService = {
     userId: string,
     payload: Partial<Omit<VolunteerProfile, 'id' | 'user_id' | 'user'>>
   ) {
-    const { error } = await supabase
+    // Try update first
+    const { error: updateError, count } = await supabase
       .from('volunteer_profiles')
       .update(payload)
-      .eq('user_id', userId);
-    if (error) throw error;
+      .eq('user_id', userId)
+      .select('id', { count: 'exact', head: true });
+
+    // If no row existed, insert instead
+    if (!updateError && count === 0) {
+      const { error: insertError } = await supabase
+        .from('volunteer_profiles')
+        .insert({ user_id: userId, ...payload });
+      if (insertError) throw insertError;
+    } else if (updateError) {
+      throw updateError;
+    }
   },
 
   // ── Schools ───────────────────────────────────────────────────────────────

@@ -52,6 +52,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSession(sess);
         setSupabaseUser(sess?.user ?? null);
         if (sess?.user) {
+          // Saat SIGNED_IN: pastikan profile sudah ada di tabel users
+          // (menangani kasus email confirmation atau first login)
+          if (event === 'SIGNED_IN') {
+            const existing = await matchingService.getUserById(sess.user.id);
+            if (!existing) {
+              // Profile belum dibuat (kasus email confirmation), buat sekarang
+              const meta = sess.user.user_metadata ?? {};
+              await authService._createUserProfile({
+                id: sess.user.id,
+                name: meta.name ?? sess.user.email ?? 'User',
+                email: sess.user.email ?? '',
+                role: meta.role ?? 'volunteer',
+                phone: meta.phone,
+                city: meta.city,
+              });
+            }
+          }
           await loadAppUser(sess.user.id);
         } else {
           setAppUser(null);

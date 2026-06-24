@@ -1,14 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-    FlatList,
-    RefreshControl,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  FlatList,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RequestCard } from '../../components/cards/RequestCard';
@@ -20,6 +21,9 @@ import { matchingService } from '../../services/matchingService';
 import type { RequestUrgency, Skill, VolunteerRequest } from '../../types';
 import { haversineDistance } from '../../utils';
 
+const RADIUS_OPTIONS = [5, 10, 25, 50];
+const SKILL_OPTIONS: Skill[] = ['Matematika', 'Bahasa Inggris', 'IPA', 'IPS', 'Fisika', 'Kimia'];
+
 export default function MissionsScreen() {
   const { volunteerProfile } = useUserContext();
   const [requests, setRequests] = useState<VolunteerRequest[]>([]);
@@ -30,18 +34,30 @@ export default function MissionsScreen() {
   const [radiusKm, setRadiusKm] = useState(50);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Use ref so realtime callback always has latest requests
+  const requestsRef = useRef<VolunteerRequest[]>([]);
+  requestsRef.current = requests;
+
   const loadRequests = useCallback(async () => {
-    const data = await matchingService.getOpenRequests();
-    setRequests(data);
+    try {
+      const data = await matchingService.getOpenRequests();
+      setRequests(data);
+    } catch (err) {
+      console.error('[Missions] loadRequests error:', err);
+    }
   }, []);
 
   useEffect(() => {
     loadRequests();
   }, [loadRequests]);
 
-  // Realtime: prepend new requests
+  // Realtime: prepend new requests, avoid duplicates
   useRealtimeRequests((newReq) => {
-    setRequests((prev) => [newReq, ...prev]);
+    setRequests((prev) => {
+      const alreadyExists = prev.some((r) => r.id === newReq.id);
+      if (alreadyExists) return prev;
+      return [newReq, ...prev];
+    });
   });
 
   // Apply filters
@@ -53,7 +69,7 @@ export default function MissionsScreen() {
       result = result.filter(
         (r) =>
           r.subject_needed.toLowerCase().includes(q) ||
-          r.school?.school_name?.toLowerCase().includes(q) ||
+          (r.school?.school_name?.toLowerCase().includes(q) ?? false) ||
           r.description.toLowerCase().includes(q)
       );
     }
@@ -68,7 +84,7 @@ export default function MissionsScreen() {
 
     if (volunteerProfile && volunteerProfile.latitude !== 0) {
       result = result.filter((r) => {
-        if (!r.school) return true;
+        if (!r.school || r.school.latitude === 0) return true;
         const d = haversineDistance(
           volunteerProfile.latitude,
           volunteerProfile.longitude,
@@ -88,8 +104,9 @@ export default function MissionsScreen() {
     setRefreshing(false);
   };
 
-  const getDistance = (req: VolunteerRequest) => {
+  const getDistance = (req: VolunteerRequest): number | undefined => {
     if (!volunteerProfile || !req.school || volunteerProfile.latitude === 0) return undefined;
+    if (req.school.latitude === 0) return undefined;
     return (
       Math.round(
         haversineDistance(
@@ -102,19 +119,39 @@ export default function MissionsScreen() {
     );
   };
 
-  const skillOptions: Skill[] = ['Matematika', 'Bahasa Inggris', 'IPA', 'IPS', 'Fisika', 'Kimia'];
+  const clearAllFilters = () => {
+    setSearch('');
+    setSkillFilter(null);
+    setUrgencyFilter(null);
+    setRadiusKm(50);
+  };
+
+  const hasActiveFilter =
+    search.trim().length > 0 || skillFilter !== null || urgencyFilter !== null || radiusKm !== 50;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Misi Tersedia</Text>
-        <Text style={styles.count}>{filtered.length} misi</Text>
+        <View style={styles.headerRight}>
+          {hasActiveFilter && (
+            <TouchableOpacity style={styles.clearBtn} onPress={clearAllFilters}>
+              <Text style={styles.clearText}>Reset</Text>
+            </TouchableOpacity>
+          )}
+          <Text style={styles.count}>{filtered.length} misi</Text>
+        </View>
       </View>
 
       {/* Search */}
       <View style={styles.searchContainer}>
-        <Ionicons name="search-outline" size={18} color={COLORS.textMuted} style={styles.searchIcon} />
+        <Ionicons
+          name="search-outline"
+          size={18}
+          color={COLORS.textMuted}
+          style={styles.searchIcon}
+        />
         <TextInput
           style={styles.searchInput}
           placeholder="Cari mata pelajaran atau sekolah..."
@@ -129,16 +166,17 @@ export default function MissionsScreen() {
         )}
       </View>
 
-      {/* Filter chips */}
-      <View style={styles.filterScroll}>
-        {/* Urgency */}
+      {/* Filter chips — scrollable horizontal */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filterRow}
+      >
+        {/* Urgency filters */}
         {URGENCY_LEVELS.map((u) => (
           <TouchableOpacity
-            key={u}
-            style={[
-              styles.chip,
-              urgencyFilter === u ? styles.activeChip : styles.inactiveChip,
-            ]}
+            key={`urgency-${u}`}
+            style={[styles.chip, urgencyFilter === u ? styles.activeChip : styles.inactiveChip]}
             onPress={() => setUrgencyFilter(urgencyFilter === u ? null : u)}
           >
             <Text
@@ -152,14 +190,14 @@ export default function MissionsScreen() {
           </TouchableOpacity>
         ))}
 
-        {/* Skills */}
-        {skillOptions.map((s) => (
+        {/* Divider */}
+        <View style={styles.chipDivider} />
+
+        {/* Skill filters */}
+        {SKILL_OPTIONS.map((s) => (
           <TouchableOpacity
-            key={s}
-            style={[
-              styles.chip,
-              skillFilter === s ? styles.activeChip : styles.inactiveChip,
-            ]}
+            key={`skill-${s}`}
+            style={[styles.chip, skillFilter === s ? styles.activeChip : styles.inactiveChip]}
             onPress={() => setSkillFilter(skillFilter === s ? null : s)}
           >
             <Text
@@ -172,7 +210,28 @@ export default function MissionsScreen() {
             </Text>
           </TouchableOpacity>
         ))}
-      </View>
+
+        {/* Divider */}
+        <View style={styles.chipDivider} />
+
+        {/* Radius filters */}
+        {RADIUS_OPTIONS.map((r) => (
+          <TouchableOpacity
+            key={`radius-${r}`}
+            style={[styles.chip, radiusKm === r ? styles.activeChip : styles.inactiveChip]}
+            onPress={() => setRadiusKm(r)}
+          >
+            <Text
+              style={[
+                styles.chipText,
+                radiusKm === r ? styles.activeChipText : styles.inactiveChipText,
+              ]}
+            >
+              {r} km
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
 
       {/* List */}
       <FlatList
@@ -181,13 +240,21 @@ export default function MissionsScreen() {
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={COLORS.primary}
+          />
         }
         ListEmptyComponent={
           <EmptyState
             icon="search-outline"
             title="Tidak ada misi"
-            subtitle="Coba ubah filter atau cek lagi nanti."
+            subtitle={
+              hasActiveFilter
+                ? 'Tidak ada misi yang cocok dengan filter. Coba ubah filter.'
+                : 'Belum ada misi tersedia. Cek lagi nanti.'
+            }
           />
         }
         renderItem={({ item }) => (
@@ -216,8 +283,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   title: { fontSize: 22, fontWeight: '700', color: COLORS.text },
   count: { fontSize: 14, color: COLORS.textSecondary },
+  clearBtn: {
+    backgroundColor: '#fee2e2',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  clearText: { fontSize: 12, color: '#dc2626', fontWeight: '600' },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -236,12 +315,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.text,
   },
-  filterScroll: {
-    flexDirection: 'row',
+  filterRow: {
     paddingHorizontal: 20,
+    paddingBottom: 12,
     gap: 8,
-    marginBottom: 12,
-    flexWrap: 'wrap',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  chipDivider: {
+    width: 1,
+    height: 20,
+    backgroundColor: COLORS.border,
+    marginHorizontal: 2,
   },
   chip: {
     paddingHorizontal: 12,
