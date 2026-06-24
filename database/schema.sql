@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS schools (
   address        TEXT NOT NULL DEFAULT '',
   latitude       FLOAT NOT NULL DEFAULT 0,
   longitude      FLOAT NOT NULL DEFAULT 0,
-  contact_person TEXT NOT NULL DEFAULT ''
+  contact_person TEXT NOT NULL DEFAULT '',
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ─── volunteer_requests ──────────────────────────────────────

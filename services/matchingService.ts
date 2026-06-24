@@ -270,7 +270,6 @@ export const matchingService = {
       .from('schools')
       .select('*')
       .eq('user_id', userId)
-      .order('created_at', { ascending: false })
       .limit(1);
 
     if (error) {
@@ -292,7 +291,6 @@ export const matchingService = {
         .from('schools')
         .select('*')
         .ilike('school_name', userRow.name)
-        .order('created_at', { ascending: false })
         .limit(1);
 
       if (byName && byName.length > 0) {
